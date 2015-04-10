@@ -68,18 +68,18 @@ module OmniAuth
             "Token" => access_token[:token],
             "AuthorizationCode" => authentication_code,
             "Action" => authentication_action
-          }
+          }.to_json, :content_type => :json, :accept => :json
         )
 
         parsed_response = JSON.parse(response)
 
-        if parsed_response['message'] == 'Success'
+        if response.code == 200
           info = {
-            id: parsed_response['data']['MemberID'],
-            first_name: parsed_response['data']['FirstName'],
-            last_name: parsed_response['data']['LastName'],
-            email: parsed_response['data']['Email'],
-            membership_status: parsed_response['data']['MembershipStatus']
+            id: parsed_response['MemberID'],
+            first_name: parsed_response['FirstName'],
+            last_name: parsed_response['LastName'],
+            email: parsed_response['Email'],
+            membership_status: parsed_response['MembershipStatus']
           }
         else
           nil
