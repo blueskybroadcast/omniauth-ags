@@ -6,6 +6,8 @@ module OmniAuth
     class Ags < OmniAuth::Strategies::OAuth2
       option :name, 'ags'
 
+      option :app_options, { app_event_id: nil }
+
       option :client_options, {
         site: 'https://www.americangemsociety.org',
         user_info_url: '/ags_ws.php',
@@ -38,11 +40,15 @@ module OmniAuth
       end
 
       def callback_phase
+        @app_event = prepare_app_event
+
         self.access_token = {
           :token =>  request.params['Token'],
           :token_expires => 60
         }
         self.env['omniauth.auth'] = auth_hash
+        self.env['omniauth.app_event_id'] = @app_event.id
+        finalize_app_event
         call_app!
       end
 
@@ -63,6 +69,8 @@ module OmniAuth
       end
 
       def get_user_info
+        request_log = "#{provider_name} Authentication Request:\nPOST #{user_info_url}, params: { token: #{Provider::SECURITY_MASK} }"
+        @app_event.logs.create(level: 'info', text: request_log)
         response = RestClient.post(user_info_url,
           {
             "Token" => access_token[:token],
@@ -73,8 +81,11 @@ module OmniAuth
 
         parsed_response = JSON.parse(response)
 
+        response_log = "#{provider_name} Authentication Response (code: #{response&.code}):\n#{response}"
+
         if response.code == 200
-          info = {
+          @app_event.logs.create(level: 'info', text: response_log)
+          {
             id: parsed_response['MemberID'],
             first_name: parsed_response['FirstName'],
             last_name: parsed_response['LastName'],
@@ -82,6 +93,8 @@ module OmniAuth
             membership_status: parsed_response['MembershipStatus']
           }
         else
+          @app_event.logs.create(level: 'error', text: response_log)
+          @app_event.fail!
           nil
         end
       end
@@ -98,6 +111,30 @@ module OmniAuth
 
       def authorize_url
         "#{options.client_options.site}#{options.client_options.authorize_url}"
+      end
+
+      def finalize_app_event
+        app_event_data = {
+          user_info: {
+            uid: info[:member_id],
+            first_name: info[:first_name],
+            last_name: info[:last_name],
+            email: info[:email],
+            membership_status: info[:membership_status]
+          }
+        }
+
+        @app_event.update(raw_data: app_event_data)
+      end
+
+      def prepare_app_event
+        slug = request.params['slug']
+        account = Account.find_by(slug: slug)
+        account.app_events.where(id: options.app_options.app_event_id).first_or_create(activity_type: 'sso')
+      end
+
+      def provider_name
+        options.name
       end
 
       def user_info_url
